@@ -1,110 +1,75 @@
-# Import necessary libraries
-from datetime import date, timedelta
-import pandas as pd
 import streamlit as st
-import joblib  # For loading .pkl models
-from sklearn.preprocessing import StandardScaler
-import os
+import pandas as pd
+import altair as alt
+from pathlib import Path
+from datetime import datetime, timedelta
+from modelrunning import fetch_stock_data, process_stock_data, calculate_predictions
 
-# Set Streamlit page configuration
+# Define the list of stock symbols to choose from
+stock_symbols = ["AMZN", "AAPL", "NVDA", "MSFT", "GOOG", "META", "TSLA", "WMT", "JPM", "NFLX"]
+
+# Set up Streamlit page configuration
 st.set_page_config(
-    layout="wide",
-    page_title="Stock Prediction",
-    page_icon="📈"
+    page_title="Stock Trend Prediction",
+    page_icon=None,
+    layout="centered",
+    initial_sidebar_state="expanded",
 )
 
-# Add title
-st.markdown("<h1 style='font-family: Arial; font-size: 25px; color: darkblue;'>Stock Prediction</h1>",
-            unsafe_allow_html=True)
+# Display the app title and an image
+st.title("Stock Trend Prediction App")
+image_path = str(Path(__file__).parent / 'images.webp')
+st.image(image_path, caption="Stock Prediction Dashboard", use_container_width=True)
 
-# Define available stocks
-stock_names = ["AMZN", "AAPL", "NVDA", "MSFT", "GOOG", "META", "TSLA", "WMT", "JPM", "NFLX"]
+# Sidebar: Stock selection
+st.sidebar.header("Stock Selection")
+selected_stock = st.sidebar.selectbox("Select a Stock:", stock_symbols)
 
-# Add stock selection dropdown
-selected_stock = st.selectbox('Select stock', stock_names)
+# Sidebar: Time frame selection
+time_frames = [5, 10, 20]
+selected_time_frame = st.sidebar.selectbox("Select Time Frame (days):", time_frames)
 
-# Load stock data from the corresponding CSV file
-@st.cache_data
-def load_data(stock_name):
-    file_path = f"../clean_data/clean_data{stock_name}.csv"  # File path for the CSV
-    if os.path.exists(file_path):
-        data = pd.read_csv(file_path)
-        data['Date'] = pd.to_datetime(data['Date'])  # Ensure time column is in datetime format
-        return data
-    else:
-        st.error(f"Data file for {stock_name} not found.")
-        return None
+# Fetch stock data
+with st.spinner(f"Fetching data for {selected_stock}..."):
+    stock_data = fetch_stock_data(selected_stock)
 
-# Load selected stock data
-data = load_data(selected_stock)
+# Process stock data
+with st.spinner(f"Processing data for {selected_stock}..."):
+    processed_data = process_stock_data(stock_data)
 
-# Check if data is successfully loaded
-if data is not None:
-    # Tab structure
-    tab1, tab2 = st.tabs(["Real-time Data", "Prediction Data"])
+# Calculate the stock predictions
+with st.spinner(f"Calculating predictions for {selected_stock}..."):
+    predictions, y_test = calculate_predictions(processed_data)
 
-    with tab1:
-        st.subheader('Real-time Data')
+# Generate a date range for the last `selected_time_frame` days (relative to yesterday)
+end_date = datetime.now() - timedelta(days=1)
+date_range = [end_date - timedelta(days=i) for i in range(selected_time_frame)][::-1]
 
-        # Date range selection
-        col1, col2 = st.columns([0.5, 0.5])
-        max_allowed_date = date(2024, 12, 1)  # Set maximum allowed date to 1/12/2024
-        with col1:
-            start_date = st.date_input("Start Date",
-                                       min_value=date(2016, 1, 2),
-                                       max_value=max_allowed_date,
-                                       value=data['Date'].min().date())
-        with col2:
-            end_date = st.date_input("End Date",
-                                     min_value=start_date,
-                                     max_value=max_allowed_date,
-                                     value=min(data['Date'].max().date(), max_allowed_date))
+# Align predictions with the corresponding dates
+prediction_data = pd.DataFrame({
+    'Date': date_range,
+    'Prediction': predictions[-selected_time_frame:]
+})
 
-        # Filter data by date range
-        filtered_data = data[(data['Date'] >= pd.to_datetime(start_date)) & (data['Date'] <= pd.to_datetime(end_date))]
+# Display the prediction result for the next day
+st.subheader("Prediction Result")
+next_day_prediction = predictions[-1]
 
-        # Display filtered data
-        st.write(f"Showing data for {selected_stock} from {start_date} to {end_date}")
-        st.write(filtered_data)
+if next_day_prediction == 1:
+    st.success(f"The predicted trend for {selected_stock} is **UP** (1) for the next day.")
+else:
+    st.error(f"The predicted trend for {selected_stock} is **DOWN** (0) for the next day.")
 
-    with tab2:
-        st.subheader('Prediction Data')
+# Display Prediction Trends Line Chart
+st.write(f"### Stock Trend Over the Last {selected_time_frame} Days:")
 
-        # Load trained models
-        log_reg_model = joblib.load("logistic_regression_model.pkl")
-        random_forest_model = joblib.load("random_forest_model.pkl")
-
-        # Prediction settings
-        n_months = st.number_input("Enter the number of months to predict:", value=1, step=1)
-        period = n_months * 30
-
-        # Prepare features for prediction
-        df_train = data[['time', 'close']].copy()
-        df_train['day_of_week'] = df_train['time'].dt.dayofweek
-        df_train['day_of_month'] = df_train['time'].dt.day
-        df_train['month'] = df_train['time'].dt.month
-        df_train['year'] = df_train['time'].dt.year
-
-        # Scale features
-        scaler = StandardScaler()
-        features = ['close', 'day_of_week', 'day_of_month', 'month', 'year']
-        scaled_features = scaler.fit_transform(df_train[features])
-
-        # Predict future values
-        future_dates = pd.date_range(df_train['time'].iloc[-1] + timedelta(days=1), periods=period)
-        log_reg_predictions = log_reg_model.predict(scaled_features[-period:])
-        rf_predictions = random_forest_model.predict(scaled_features[-period:])
-
-        # Create predictions dataframe
-        predictions_df = pd.DataFrame({
-            'time': future_dates,
-            'logistic_regression': log_reg_predictions,
-            'random_forest': rf_predictions
-        })
-
-        # Display prediction results
-        st.write(f"Predicted values for {selected_stock}")
-        st.line_chart(predictions_df.set_index('time'))
-
-        with st.expander("View Prediction Data"):
-            st.write(predictions_df)
+# Prediction Trend Chart
+prediction_chart = alt.Chart(prediction_data).mark_line(size=2).encode(
+    x=alt.X('Date:T', title='Date'),
+    y=alt.Y('Prediction:Q', title='Prediction Trend', scale=alt.Scale(domain=[0, 1])),
+    color=alt.value('blue')
+).properties(
+    width=600,
+    height=400
+)
+st.altair_chart(prediction_chart, use_container_width=True)
