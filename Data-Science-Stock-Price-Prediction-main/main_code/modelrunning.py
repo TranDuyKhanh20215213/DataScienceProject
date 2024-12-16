@@ -225,8 +225,8 @@ def calculate_predictions(df):
     # Make predictions
     predictions = lr.predict(X_test_scaled)
 
-    # Return the last prediction
-    return predictions[-1]
+    # Return the predictions and the y_test set
+    return predictions, y_test.values
 
 
 
