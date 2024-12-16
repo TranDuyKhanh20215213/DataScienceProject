@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegression
@@ -203,30 +205,29 @@ def process_stock_data(stock_data):
     return df
 
 def calculate_predictions(df):
-    # Assuming that df contains all stock data with 'trend' as the target column
-    # Select features (excluding 'trend')
-    X = df.loc[:, df.columns != 'trend']
+    # Define the feature set for Random Forest
+    X = df[['Volume', 'ema50', 'ema21',
+                              'ema14', 'ema5', 'rsi',
+                              'macd', 'roc', 'obv',
+                              'atr', 'cmf', 'emv',
+                              'stoch', 'cci', 'mfi']]
     y = df['trend']
 
-    # Split data into train and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=21)
+    # Split data into train and test sets without shuffling (time-series structure maintained)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, shuffle=False)
 
-    # Scale the features
-    scaler = MinMaxScaler()
-    X_train_scaled = scaler.fit_transform(X_train.values)
-    X_test_scaled = scaler.transform(X_test.values)
-
-    # Initialize the Logistic Regression model
-    lr = LogisticRegression(penalty='l2', C=0.1, random_state=42)
+    # Initialize the Random Forest Classifier
+    rf = RandomForestClassifier(n_estimators=110, random_state=21)
 
     # Train the model
-    lr.fit(X_train_scaled, y_train.values)
+    rf.fit(X_train.values, y_train.values)
 
-    # Make predictions
-    predictions = lr.predict(X_test_scaled)
+    # Predict using the trained model
+    predictions = rf.predict(X_test.values)
 
-    # Return the predictions and the y_test set
+    # Return predictions and the y_test set
     return predictions, y_test.values
+
 
 
 
